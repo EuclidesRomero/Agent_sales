@@ -1,7 +1,12 @@
-import json
-from state.state import AgentState
-from model.model import llm
+from pydantic import BaseModel, Field
+from src.state.state import AgentState
+from src.model.model import llm
 from langchain_core.messages import HumanMessage, SystemMessage
+
+
+class IntentResult(BaseModel):
+    name: str = Field(description="The classified intent name")
+    confidence: float = Field(description="Confidence score between 0 and 1")
 
 
 def handled_intent(state: AgentState) -> AgentState:
@@ -23,20 +28,18 @@ Classify the user's intent into one of the following categories:
 - transaction: User wants to make a purchase or complete a transaction
 - human_request: User explicitly requests to speak with a human agent
 - out_of_scope: User asks about topics unrelated to the business, products, or services
-- unknown: The intent is unclear or doesn't fit any category
-
-Respond with only the intent name and a confidence score between 0 and 1, in JSON format: {"name": "intent", "confidence": 0.95}"""
+- unknown: The intent is unclear or doesn't fit any category"""
     
     last_message = state["messages"][-1] if state["messages"] else None
     
     if last_message:
-        response = llm.invoke([
+        structured_llm = llm.with_structured_output(IntentResult)
+        response = structured_llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=last_message.content)
         ])
         
-        intent_result = json.loads(response.content)
-        state["intent"]["name"] = intent_result["name"]
-        state["intent"]["confidence"] = intent_result["confidence"]
+        state["intent"]["name"] = response.name
+        state["intent"]["confidence"] = response.confidence
     
     return state

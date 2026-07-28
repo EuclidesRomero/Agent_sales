@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from src.state.state import AgentState
 from src.model.model import llm
-from langchain_core.messages import HumanMessage, SystemMessage
 
 
 class IntentResult(BaseModel):
@@ -9,8 +10,7 @@ class IntentResult(BaseModel):
     confidence: float = Field(description="Confidence score between 0 and 1")
 
 
-def handled_intent(state: AgentState) -> AgentState:
-    system_prompt = """You are an intent classifier for a business sales assistant.
+SYSTEM_PROMPT = """You are an intent classifier for a business sales assistant.
 
 The agent only handles:
 - Business information
@@ -29,17 +29,23 @@ Classify the user's intent into one of the following categories:
 - human_request: User explicitly requests to speak with a human agent
 - out_of_scope: User asks about topics unrelated to the business, products, or services
 - unknown: The intent is unclear or doesn't fit any category"""
-    
-    last_message = state["messages"][-1] if state["messages"] else None
-    
-    if last_message:
-        structured_llm = llm.with_structured_output(IntentResult)
-        response = structured_llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=last_message.content)
-        ])
-        
-        state["intent"]["name"] = response.name
-        state["intent"]["confidence"] = response.confidence
-    
-    return state
+
+
+def handled_intent(state: AgentState) -> dict:
+    # Solo clasificamos con base en lo que dijo el CLIENTE, nunca con base en
+    # el último mensaje si por alguna razón fuera del propio asistente.
+    human_messages = [m for m in state["messages"] if isinstance(m, HumanMessage)]
+    last_message = human_messages[-1] if human_messages else None
+
+    if last_message is None:
+        return {"intent": {"name": "unknown", "confidence": 0.0}}
+
+    structured_llm = llm.with_structured_output(IntentResult)
+    response = structured_llm.invoke([
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=last_message.content),
+    ])
+
+    # Devolvemos SOLO lo que cambió, no el estado completo mutado --
+    # así LangGraph aplica el merge correctamente sobre el resto del state.
+    return {"intent": {"name": response.name, "confidence": response.confidence}}

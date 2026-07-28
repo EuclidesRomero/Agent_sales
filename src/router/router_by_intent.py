@@ -1,5 +1,15 @@
 from src.state.state import AgentState
 
+
+def route_entry(state: AgentState) -> str:
+    transaction = state.get("transaction")
+
+    if transaction and transaction.get("items") and not transaction.get("is_complete"):
+        return "handle_transaction"
+
+    return "classify_intent"
+
+
 def route_by_intent(state: AgentState) -> str:
     intent_name = state["intent"]["name"]
 
@@ -12,7 +22,4 @@ def route_by_intent(state: AgentState) -> str:
         "out_of_scope": "handle_out_of_scope",
     }
 
-    return intent_to_node.get(
-        intent_name,
-        "handle_out_of_scope"
-    )
+    return intent_to_node.get(intent_name, "handle_out_of_scope")

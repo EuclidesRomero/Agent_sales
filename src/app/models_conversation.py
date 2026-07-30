@@ -58,6 +58,13 @@ class Conversation(Base, TimestampMixin):
             "business_id",
             "status",
         ),
+        Index(
+            "ux_conversations_one_active_per_customer",
+            "business_id",
+            "external_user_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -3,16 +3,17 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
-from src.graph import build_sales_agent_graph
-from app.database import async_session_maker
-from app.repositories.conversation_repository import get_or_create_conversation
-from app.models_conversation import Channel
+from src.graph import build_sales_agent_graph, close_pool
+from src.app.database import async_session_maker
+from src.app.repositories.conversation_repository import get_or_create_conversation
+from src.app.models_conversation import Channel
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.sales_agent = await build_sales_agent_graph()
     yield
+    await close_pool()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -54,5 +55,5 @@ async def chat(request: MessageRequest):
     return {
         "response": result["messages"][-1].content,
         "intent": result["intent"],
-        "conversation_id": conversation.id,  # útil para verificar en tus pruebas
+        "conversation_id": conversation.id,  
     }

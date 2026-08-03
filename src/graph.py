@@ -2,6 +2,7 @@ import os
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
 from src.state.state import AgentState
 from src.nodes.intent import handled_intent
@@ -14,12 +15,23 @@ from src.router.router_by_intent import route_by_intent, route_entry
 
 CHECKPOINTER_DATABASE_URL = os.getenv("CHECKPOINTER_DATABASE_URL")
 
+_pool: AsyncConnectionPool | None = None
+
 
 async def build_sales_agent_graph():
+    global _pool
+
     workflow = StateGraph(AgentState)
 
-    checkpointer_cm = AsyncPostgresSaver.from_conn_string(CHECKPOINTER_DATABASE_URL)
-    checkpointer = await checkpointer_cm.__aenter__()
+    _pool = AsyncConnectionPool(
+        conninfo=CHECKPOINTER_DATABASE_URL,
+        max_size=20,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+        open=False,
+    )
+    await _pool.open()
+
+    checkpointer = AsyncPostgresSaver(_pool)
     await checkpointer.setup()
 
     workflow.add_node("classify_intent", handled_intent)
@@ -39,3 +51,8 @@ async def build_sales_agent_graph():
     workflow.add_edge("handle_out_of_scope", END)
 
     return workflow.compile(checkpointer=checkpointer)
+
+
+async def close_pool():
+    if _pool is not None:
+        await _pool.close()

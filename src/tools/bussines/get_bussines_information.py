@@ -1,6 +1,13 @@
 from langchain_core.tools import tool
-from app.database import async_session_maker
-from app.repositories.business_repository import build_business_context
+from src.app.database import async_session_maker
+from src.app.repositories.business_repository import build_business_context
+
+async def _get_business_information_impl(business_id: int) -> dict:
+    """
+    Implementación interna para obtener información del negocio.
+    """
+    async with async_session_maker() as session:
+        return await build_business_context(session, business_id)
 
 @tool
 async def get_business_information(business_id: int) -> dict:
@@ -16,5 +23,4 @@ async def get_business_information(business_id: int) -> dict:
     Args:
         business_id: id del negocio que está siendo atendido en la conversación actual.
     """
-    async with async_session_maker() as session:
-        return await build_business_context(session, business_id)
+    return await _get_business_information_impl(business_id)

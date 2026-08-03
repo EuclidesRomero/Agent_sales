@@ -17,8 +17,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models import TimestampMixin
+from src.app.database import Base
+from src.app.models import TimestampMixin
 
 
 class Channel(str, Enum):

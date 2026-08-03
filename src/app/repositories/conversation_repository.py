@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models_conversation import Conversation, ConversationStatus, Channel
+from src.app.models_conversation import Conversation, ConversationStatus, Channel
 
 
 async def get_or_create_conversation(

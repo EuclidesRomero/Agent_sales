@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from app.models import Business, KnowledgeDocument, DocumentType
+from src.app.models import Business, KnowledgeDocument, DocumentType
 
 
 async def build_business_context(session: AsyncSession, business_id: int) -> dict | None:

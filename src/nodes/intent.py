@@ -31,17 +31,15 @@ Classify the user's intent into one of the following categories:
 - unknown: The intent is unclear or doesn't fit any category"""
 
 
-def handled_intent(state: AgentState) -> dict:
-    # Solo clasificamos con base en lo que dijo el CLIENTE, nunca con base en
-    # el último mensaje si por alguna razón fuera del propio asistente.
+async def handled_intent(state: AgentState) -> dict:
     human_messages = [m for m in state["messages"] if isinstance(m, HumanMessage)]
     last_message = human_messages[-1] if human_messages else None
 
     if last_message is None:
         return {"intent": {"name": "unknown", "confidence": 0.0}}
 
-    structured_llm = llm.with_structured_output(IntentResult)
-    response = structured_llm.invoke([
+    structured_llm = llm.with_structured_output(IntentResult, method="function_calling")
+    response = await structured_llm.ainvoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=last_message.content),
     ])

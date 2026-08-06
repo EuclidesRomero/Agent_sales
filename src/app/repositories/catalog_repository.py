@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, join
 from sqlalchemy.orm import selectinload
-from src.app.models import BusinessResource, ResourceType
+from src.app.models import BusinessResource, BusinessResourceVariant, ResourceType
 
 
 async def search_catalog(

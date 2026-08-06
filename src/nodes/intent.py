@@ -10,7 +10,7 @@ class IntentResult(BaseModel):
     confidence: float = Field(description="Confidence score between 0 and 1")
 
 
-SYSTEM_PROMPT = """You are an intent classifier for a business sales assistant.
+SYSTEM_PROMPT = """You are an intent classifier for a business sales assistant. Respond in JSON format.
 
 The agent only handles:
 - Business information
@@ -28,7 +28,9 @@ Classify the user's intent into one of the following categories:
 - transaction: User wants to make a purchase or complete a transaction
 - human_request: User explicitly requests to speak with a human agent
 - out_of_scope: User asks about topics unrelated to the business, products, or services
-- unknown: The intent is unclear or doesn't fit any category"""
+- unknown: The intent is unclear or doesn't fit any category
+
+Your response must be a valid JSON object with 'name' and 'confidence' fields."""
 
 
 async def handled_intent(state: AgentState) -> dict:

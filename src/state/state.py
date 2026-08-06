@@ -1,5 +1,6 @@
 from typing import Annotated, Sequence, Literal, Optional
 from typing_extensions import TypedDict
+from decimal import Decimal
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -37,8 +38,12 @@ class BusinessInfoState(TypedDict):
 
 
 class OrderItem(TypedDict):
-    product_name: str
-    quantity: int
+    product_name: str                    
+    resource_id: Optional[int]           
+    variant_id: Optional[int]            
+    variant_name: Optional[str]          
+    quantity: Optional[int]
+    unit_price: Optional[Decimal] 
 
 
 class TransactionState(TypedDict):

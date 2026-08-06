@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/business_information
       CHECKPOINTER_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/business_information
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_API_KEY: ${DEEPSEEK_API_KEY}
 
     depends_on:
       - postgres

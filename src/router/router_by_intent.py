@@ -7,6 +7,10 @@ async def route_entry(state: AgentState) -> str:
     if transaction and transaction.get("items") and not transaction.get("is_complete"):
         return "handle_transaction"
 
+    product_query = state.get("product_query")
+    if product_query and product_query.get("results"):
+        return "handle_transaction"
+
     return "classify_intent"
 
 

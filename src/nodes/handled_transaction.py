@@ -1,47 +1,16 @@
-from typing import Literal, Optional
+import json
 
-from pydantic import BaseModel, Field
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from src.state.state import AgentState
-from src.app.repositories.catalog_repository import search_catalog
+from src.app.repositories.catalog_repository import search_catalog, get_product_details
 from src.app.database import async_session_maker
 from src.app.models import Business
 from src.model.model import llm
 
-class OrderExtraction(BaseModel):
-    message_type: Literal["provide_info", "status_query", "other"] = Field(
-        description="Tipo de mensaje del cliente dentro del flujo de compra. "
-        "'provide_info' si está dando datos del pedido (producto, cantidad, "
-        "dirección, método de pago). 'status_query' si está preguntando qué "
-        "ha pedido hasta el momento, o pidiendo un resumen de su pedido "
-        "actual. 'other' para cualquier otro caso."
-    )
-    product_name: Optional[str] = Field(
-        description="Nombre del producto o servicio que el cliente quiere, tal "
-        "como lo menciona en su mensaje (ej: 'torta de chocolate', 'decoración "
-        "personalizada'). Si el cliente no menciona ningún producto en este "
-        "mensaje puntual, deja este campo como null -- no asumas ni reutilices "
-        "un producto mencionado en un turno anterior."
-    )
-    quantity: Optional[int] = Field(
-        description="Cantidad de unidades que el cliente quiere, incluso si la "
-        "escribió en palabras (ej: 'dos' -> 2). Si el cliente no menciona "
-        "ninguna cantidad en el mensaje actual, deja este campo como null -- "
-        "no asumas 1 por defecto."
-    )
-    address: Optional[str] = Field(
-        description="Dirección de entrega que el cliente proporciona en este "
-        "mensaje (ej: 'Cra 45 #12-30'). Si el cliente no menciona ninguna "
-        "dirección en este mensaje puntual, deja este campo como null."
-    )
-    payment_method: Optional[str] = Field(
-        description="Método de pago que el cliente menciona (ej: 'efectivo', "
-        "'tarjeta', 'transferencia', 'Nequi'). Si no lo menciona en este "
-        "mensaje puntual, deja este campo como null."
-    )
 
-def _match_by_words(text: str, candidates: list, name_key: str = "name") -> Optional[object]:
+def _match_by_words(text: str, candidates: list, name_key: str = "name"):
     text_words = set(text.lower().split())
     scored = []
     for c in candidates:
@@ -50,7 +19,6 @@ def _match_by_words(text: str, candidates: list, name_key: str = "name") -> Opti
         overlap = text_words & candidate_words
         if overlap:
             scored.append((len(overlap), c))
-
     if not scored:
         return None
     scored.sort(key=lambda x: -x[0])
@@ -59,7 +27,7 @@ def _match_by_words(text: str, candidates: list, name_key: str = "name") -> Opti
     return scored[0][1]
 
 
-def _extract_quantity_fallback(text: str) -> Optional[int]:
+def _extract_quantity_fallback(text: str):
     words_to_num = {
         "un": 1, "una": 1, "uno": 1, "dos": 2, "tres": 3, "cuatro": 4,
         "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
@@ -72,84 +40,6 @@ def _extract_quantity_fallback(text: str) -> Optional[int]:
     return None
 
 
-def _create_order_item(product_name, resource_id, variant_id, variant_name, quantity, unit_price) -> dict:
-    return {
-        "product_name": product_name,
-        "resource_id": resource_id,
-        "variant_id": variant_id,
-        "variant_name": variant_name,
-        "quantity": quantity,
-        "unit_price": unit_price,
-    }
-
-
-def _add_item_to_transaction(state: AgentState, item: dict) -> dict:
-    transaction = dict(state.get("transaction") or {
-        "items": [], "is_complete": False, "requires_human": False, "request_id": None
-    })
-    transaction["items"] = transaction["items"] + [item]
-    return transaction
-
-
-def _missing_fields(transaction: dict, customer: dict) -> list[str]:
-    missing = []
-    if not transaction.get("items"):
-        missing.append("qué producto quieres pedir")
-    else:
-        for item in transaction["items"]:
-            if not item.get("quantity"):
-                missing.append("la cantidad")
-                break
-    if not customer.get("address"):
-        missing.append("tu dirección de entrega")
-    if not customer.get("payment_method"):
-        missing.append("tu método de pago")
-    return missing
-
-
-def _finalize_turn(transaction: dict, customer: dict, product_query: dict, lead_message: Optional[str] = None) -> dict:
-    missing = _missing_fields(transaction, customer)
-
-    if not missing:
-        transaction["is_complete"] = True
-        closing = "¡Perfecto! Ya tengo todo tu pedido, dame un momento para confirmarlo."
-    else:
-        closing = f"Ahora dime {missing[0]}."
-
-    content = f"{lead_message} {closing}" if lead_message else closing
-
-    return {
-        "transaction": transaction,
-        "customer": customer,
-        "product_query": product_query,
-        "messages": [AIMessage(content=content)],
-    }
-
-
-def _build_order_summary(transaction: dict, customer: dict) -> str:
-    items = transaction.get("items", [])
-    if not items:
-        return "Todavía no has agregado ningún producto a tu pedido."
-
-    lines = ["Hasta el momento tienes:"]
-    total = 0.0
-    for item in items:
-        qty = item.get("quantity") or 1
-        price = float(item.get("unit_price") or 0)
-        subtotal = qty * price
-        total += subtotal
-        variant = f" ({item['variant_name']})" if item.get("variant_name") else ""
-        lines.append(f"- {qty}x {item['product_name']}{variant}: ${subtotal:,.0f}")
-
-    lines.append(f"\nTotal: ${total:,.0f}")
-    if customer.get("address"):
-        lines.append(f"Dirección: {customer['address']}")
-    if customer.get("payment_method"):
-        lines.append(f"Pago: {customer['payment_method']}")
-
-    return "\n".join(lines)
-
-
 async def _get_accepted_payment_methods(business_id: int) -> list[str]:
     async with async_session_maker() as db:
         business = await db.get(Business, business_id)
@@ -157,163 +47,227 @@ async def _get_accepted_payment_methods(business_id: int) -> list[str]:
         return policies.get("metodos_pago", [])
 
 
-async def transaction_node(state: AgentState) -> dict:
-    human_messages = [m for m in state["messages"] if isinstance(m, HumanMessage)]
-    last_message = human_messages[-1] if human_messages else None
-
-    if last_message is None:
-        return {"messages": [AIMessage(content="¿Podrías repetir tu pedido?")]}
-
-    business_id = int(state["business_id"])
-    customer = dict(state.get("customer") or {})
-    product_query = state.get("product_query") or {}
-
-    if product_query.get("results"):
-        matched = _match_by_words(last_message.content, product_query["results"], name_key="name")
-
-        if matched is None:
-            options = ", ".join(c["name"] for c in product_query["results"])
-            return {"messages": [AIMessage(
-                content=f"No logré identificar cuál prefieres. Opciones: {options}. ¿Cuál eliges?"
-            )]}
-
-        quantity = _extract_quantity_fallback(last_message.content) or 1
-        selected_product = product_query.get("selected_product")
-
-        if selected_product:
-            item = _create_order_item(
-                selected_product["name"], selected_product["resource_id"],
-                matched["variant_id"], matched["name"], quantity, matched["price"],
-            )
-            transaction = _add_item_to_transaction(state, item)
-            empty_query = {"query": None, "results": [], "selected_product": None}
-            return _finalize_turn(
-                transaction, customer, empty_query,
-                lead_message=f"Agregué {selected_product['name']} ({matched['name']}) a tu pedido.",
-            )
-
-        variants = matched.get("variants", [])
-        if len(variants) > 1:
-            options = ", ".join(v["name"] for v in variants)
-            new_query = {
-                "query": matched["name"],
-                "selected_product": {"resource_id": matched["resource_id"], "name": matched["name"]},
-                "results": variants,
-            }
-            return {
-                "product_query": new_query,
-                "messages": [AIMessage(content=f"¿Qué variante de {matched['name']} prefieres? Opciones: {options}")],
-            }
-
-        variant = variants[0]
-        item = _create_order_item(
-            matched["name"], matched["resource_id"],
-            variant["variant_id"], variant["name"], quantity, variant["price"],
-        )
-        transaction = _add_item_to_transaction(state, item)
-        empty_query = {"query": None, "results": [], "selected_product": None}
-        return _finalize_turn(
-            transaction, customer, empty_query,
-            lead_message=f"Agregué {matched['name']} ({variant['name']}) a tu pedido.",
-        )
-
-    structured_llm = llm.with_structured_output(OrderExtraction, method="function_calling")
-    extraction = await structured_llm.ainvoke([last_message])
-
-    transaction = dict(state.get("transaction") or {
-        "items": [], "is_complete": False, "requires_human": False, "request_id": None
-    })
-
-    if extraction.message_type == "status_query":
-        summary = _build_order_summary(transaction, customer)
-        return {"messages": [AIMessage(content=summary)]}
-
-    if extraction.address:
-        customer["address"] = extraction.address
-
-    if extraction.payment_method:
-        accepted = await _get_accepted_payment_methods(business_id)
-        accepted_lower = [m.lower() for m in accepted]
-        if accepted_lower and extraction.payment_method.lower() not in accepted_lower:
-            accepted_text = ", ".join(accepted)
-            return {
-                "customer": customer,
-                "messages": [AIMessage(
-                    content=f"No aceptamos {extraction.payment_method}. Métodos disponibles: {accepted_text}. ¿Cuál usarías?"
-                )],
-            }
-        customer["payment_method"] = extraction.payment_method
-
-    if not extraction.product_name:
-        empty_query = {"query": None, "results": [], "selected_product": None}
-        return _finalize_turn(transaction, customer, empty_query)
-
+async def _resolve_product_logic(business_id: int, query: str) -> str:
     async with async_session_maker() as db:
-        matched_products = await search_catalog(db, business_id=business_id, search_query=extraction.product_name)
+        matched = await search_catalog(db, business_id=business_id, search_query=query)
+        if not matched:
+            all_products = await search_catalog(db, business_id=business_id)
+            fallback = _match_by_words(query, all_products, name_key="name")
+            if fallback is not None:
+                matched = [fallback]
 
-    if not matched_products:
-        return {
-            "customer": customer,
-            "messages": [AIMessage(
-                content=f"No encontré '{extraction.product_name}'. ¿Podrías confirmarme el nombre del producto?"
-            )],
-        }
+    if not matched:
+        return json.dumps({"not_found": True, "query": query})
 
-    if len(matched_products) > 1:
-        results = [
-            {
-                "resource_id": r.id,
-                "name": r.name,
-                "variants": [{"variant_id": v.id, "name": v.name, "price": float(v.price)} for v in r.variants],
-            }
-            for r in matched_products
-        ]
-        options = ", ".join(r.name for r in matched_products)
-        new_query = {"query": extraction.product_name, "results": results, "selected_product": None}
-        return {
-            "customer": customer,
-            "product_query": new_query,
-            "messages": [AIMessage(content=f"Encontré varias opciones: {options}. ¿Cuál prefieres?")],
-        }
+    if len(matched) > 1:
+        options = [{"resource_id": r.id, "name": r.name} for r in matched]
+        return json.dumps({"ambiguous": True, "options": options})
 
-    resource = matched_products[0]
+    resource = matched[0]
 
     if len(resource.variants) > 1:
-        matched_variant = _match_by_words(last_message.content, resource.variants, name_key="name")
+        variant_match = _match_by_words(query, resource.variants, name_key="name")
+        if variant_match is not None:
+            return json.dumps({
+                "resolved": True,
+                "resource_id": resource.id,
+                "product_name": resource.name,
+                "variant_id": variant_match.id,
+                "variant_name": variant_match.name,
+                "unit_price": float(variant_match.price),
+            })
 
-        if matched_variant:
-            item = _create_order_item(
-                resource.name, resource.id, matched_variant.id, matched_variant.name,
-                extraction.quantity or 1, matched_variant.price,
-            )
-            transaction = _add_item_to_transaction(state, item)
-            empty_query = {"query": None, "results": [], "selected_product": None}
-            return _finalize_turn(
-                transaction, customer, empty_query,
-                lead_message=f"Agregué {resource.name} ({matched_variant.name}) a tu pedido.",
-            )
-
-        results = [{"variant_id": v.id, "name": v.name, "price": float(v.price)} for v in resource.variants]
-        options = ", ".join(v["name"] for v in results)
-        new_query = {
-            "query": extraction.product_name,
-            "selected_product": {"resource_id": resource.id, "name": resource.name},
-            "results": results,
-        }
-        return {
-            "customer": customer,
-            "product_query": new_query,
-            "messages": [AIMessage(content=f"¿Qué variante de {resource.name} prefieres? Opciones: {options}")],
-        }
+        options = [{"variant_id": v.id, "name": v.name, "price": float(v.price)} for v in resource.variants]
+        return json.dumps({
+            "needs_variant": True,
+            "resource_id": resource.id,
+            "product_name": resource.name,
+            "options": options,
+        })
 
     variant = resource.variants[0]
-    item = _create_order_item(
-        resource.name, resource.id, variant.id, variant.name,
-        extraction.quantity or 1, variant.price,
+    return json.dumps({
+        "resolved": True,
+        "resource_id": resource.id,
+        "product_name": resource.name,
+        "variant_id": variant.id,
+        "variant_name": variant.name,
+        "unit_price": float(variant.price),
+    })
+
+
+def _add_item_logic(context: dict, resource_id: int, variant_id: int, variant_name: str,
+                     product_name: str, unit_price: float, quantity: int = 1) -> str:
+    item = {
+        "product_name": product_name,
+        "resource_id": resource_id,
+        "variant_id": variant_id,
+        "variant_name": variant_name,
+        "quantity": quantity,
+        "unit_price": unit_price,
+    }
+    context["transaction"]["items"] = context["transaction"]["items"] + [item]
+    return json.dumps({"added": True, "item": item})
+
+
+def _set_address_logic(context: dict, address: str) -> str:
+    context["customer"]["address"] = address
+    return json.dumps({"address_set": True, "address": address})
+
+
+async def _set_payment_method_logic(context: dict, business_id: int, payment_method: str) -> str:
+    accepted = await _get_accepted_payment_methods(business_id)
+    accepted_lower = [m.lower() for m in accepted]
+
+    if accepted_lower and payment_method.lower() not in accepted_lower:
+        return json.dumps({
+            "accepted": False,
+            "reason": "not_supported",
+            "available_methods": accepted,
+        })
+
+    context["customer"]["payment_method"] = payment_method
+    return json.dumps({"accepted": True, "payment_method": payment_method})
+
+
+def _get_order_summary_logic(context: dict) -> str:
+    transaction = context["transaction"]
+    customer = context["customer"]
+
+    missing = []
+    if not transaction["items"]:
+        missing.append("producto")
+    else:
+        for item in transaction["items"]:
+            if not item.get("quantity"):
+                missing.append("cantidad")
+                break
+    if not customer.get("address"):
+        missing.append("direccion de entrega")
+    if not customer.get("payment_method"):
+        missing.append("metodo de pago")
+
+    total = sum(
+        (item.get("quantity") or 1) * float(item.get("unit_price") or 0)
+        for item in transaction["items"]
     )
-    transaction = _add_item_to_transaction(state, item)
-    empty_query = {"query": None, "results": [], "selected_product": None}
-    return _finalize_turn(
-        transaction, customer, empty_query,
-        lead_message=f"Agregué {resource.name} ({variant.name}) a tu pedido.",
-    )
+
+    return json.dumps({
+        "items": transaction["items"],
+        "address": customer.get("address"),
+        "payment_method": customer.get("payment_method"),
+        "total": total,
+        "missing_fields": missing,
+        "is_complete": len(missing) == 0,
+    })
+
+
+async def transaction_node(state: AgentState) -> dict:
+    context = {
+        "transaction": dict(state.get("transaction") or {
+            "items": [], "is_complete": False, "requires_human": False, "request_id": None
+        }),
+        "customer": dict(state.get("customer") or {}),
+    }
+    business_id = int(state["business_id"])
+
+
+    @tool
+    async def resolve_product(query: str) -> str:
+        """
+        Busca un producto o servicio en el catálogo del negocio a partir de lo
+        que el cliente mencionó (puede ser el nombre completo, parcial, o
+        mezclado con el nombre de una variante, ej: "hamburguesa clásica
+        simple" o solo "la doble").
+
+        Devuelve un JSON con uno de estos casos:
+        - resolved: true -- ya se identificó un único producto y una única
+          variante, con su resource_id y variant_id listos para usar en
+          add_item_to_order.
+        - needs_variant: true -- se identificó el producto, pero tiene varias
+          variantes y no se pudo determinar cuál. Pregúntale al cliente cuál
+          prefiere, usando la lista de "options".
+        - ambiguous: true -- hay varios productos distintos que calzan con la
+          búsqueda. Pregúntale al cliente cuál, usando la lista de "options".
+        - not_found: true -- no existe nada parecido en el catálogo.
+        """
+        return await _resolve_product_logic(business_id, query)
+
+    @tool
+    async def add_item_to_order(resource_id: int, variant_id: int, variant_name: str,
+        product_name: str, unit_price: float, quantity: int = 1) -> str:
+        """
+        Agrega un ítem al pedido en curso. SIEMPRE debes haber llamado antes a
+        resolve_product para obtener resource_id, variant_id, variant_name,
+        product_name y unit_price reales -- nunca inventes estos valores.
+
+        Args:
+            resource_id: id del producto, obtenido de resolve_product.
+            variant_id: id de la variante específica, obtenido de resolve_product.
+            variant_name: nombre de la variante, obtenido de resolve_product.
+            product_name: nombre del producto, obtenido de resolve_product.
+            unit_price: precio de la variante, obtenido de resolve_product.
+            quantity: cantidad que el cliente quiere. Si no lo dijo explícitamente, usa 1.
+        """
+        return _add_item_logic(context, resource_id, variant_id, variant_name, product_name, unit_price, quantity)
+
+    @tool
+    async def set_delivery_address(address: str) -> str:
+        """
+        Guarda la dirección de entrega que el cliente proporcionó para el pedido.
+        """
+        return _set_address_logic(context, address)
+
+    @tool
+    async def set_payment_method(payment_method: str) -> str:
+        """
+        Intenta guardar el método de pago que el cliente mencionó (ej:
+        'efectivo', 'tarjeta', 'transferencia', 'Nequi'). Valida contra los
+        métodos que acepta el negocio -- si devuelve accepted: false, informa
+        al cliente qué métodos sí están disponibles (available_methods) y
+        pídele que elija uno de esos, SIN guardar el que había mencionado.
+        """
+        return await _set_payment_method_logic(context, business_id, payment_method)
+
+    @tool
+    async def get_order_summary() -> str:
+        """
+        Devuelve el estado actual del pedido: ítems agregados, dirección,
+        método de pago, total, qué campos faltan (missing_fields), y si el
+        pedido ya está completo (is_complete). Úsala cuando el cliente
+        pregunte qué ha pedido hasta el momento, o para revisar tú mismo qué
+        falta antes de responder.
+        """
+        return _get_order_summary_logic(context)
+
+    tools = [resolve_product, add_item_to_order, set_delivery_address, set_payment_method, get_order_summary]
+    llm_with_tools = llm.bind_tools(tools)
+    
+    messages = [m for m in state["messages"]]
+    
+    while True:
+        response = await llm_with_tools.ainvoke(messages)
+        messages.append(response)
+        
+        if not response.tool_calls:
+            break
+        
+        for tool_call in response.tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+            
+            tool_func = next((t for t in tools if t.name == tool_name), None)
+            if tool_func:
+                result = await tool_func.ainvoke(tool_args)
+                tool_message = ToolMessage(
+                    content=result,
+                    tool_call_id=tool_call["id"],
+                    name=tool_name
+                )
+                messages.append(tool_message)
+    
+    return {
+        "messages": messages,
+        "transaction": context["transaction"],
+        "customer": context["customer"],
+    }

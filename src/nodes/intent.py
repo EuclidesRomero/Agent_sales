@@ -10,9 +10,10 @@ class IntentResult(BaseModel):
     confidence: float = Field(description="Confidence score between 0 and 1")
 
 
-SYSTEM_PROMPT = """You are an intent classifier for a business sales assistant. Respond in JSON format.
+SYSTEM_PROMPT = """You are an intent classifier for a business sales assistant.
 
 The agent only handles:
+- Greetings / opening a conversation
 - Business information
 - Products or services
 - Purchase requests
@@ -23,14 +24,16 @@ If the user asks about unrelated topics, classify as out_of_scope.
 Never classify unrelated questions as business_information or product_service_knowledge.
 
 Classify the user's intent into one of the following categories:
+- greeting: User is just saying hello, opening the conversation, or making small
+  talk without a specific request yet (ej: "Hola", "Buenas tardes", "Hey"). If
+  the message ALSO contains a specific request (ej: "Hola, ¿tienen tortas de
+  chocolate?"), classify by that specific request instead, NOT as greeting.
 - business_information: User is asking for information about the business (hours, location, contact, etc.)
 - product_service_knowledge: User is asking about products or services offered
 - transaction: User wants to make a purchase or complete a transaction
 - human_request: User explicitly requests to speak with a human agent
 - out_of_scope: User asks about topics unrelated to the business, products, or services
-- unknown: The intent is unclear or doesn't fit any category
-
-Your response must be a valid JSON object with 'name' and 'confidence' fields."""
+- unknown: The intent is unclear or doesn't fit any category"""
 
 
 async def handled_intent(state: AgentState) -> dict:
@@ -46,6 +49,4 @@ async def handled_intent(state: AgentState) -> dict:
         HumanMessage(content=last_message.content),
     ])
 
-    # Devolvemos SOLO lo que cambió, no el estado completo mutado --
-    # así LangGraph aplica el merge correctamente sobre el resto del state.
     return {"intent": {"name": response.name, "confidence": response.confidence}}

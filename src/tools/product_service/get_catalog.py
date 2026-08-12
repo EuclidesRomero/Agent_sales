@@ -11,7 +11,7 @@ async def _get_catalog_impl(business_id: int) -> str:
         catalog = await search_catalog(db, business_id)
         catalog_text = ""
         for resource in catalog:
-            catalog_text += f"\n{resource.name} ({resource.type.value})"
+            catalog_text += f"\n[id: {resource.id}] {resource.name} ({resource.type.value})"
             if resource.description:
                 catalog_text += f": {resource.description}"
             if resource.variants:

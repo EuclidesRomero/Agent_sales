@@ -50,7 +50,8 @@ async def build_sales_agent_graph():
     workflow.add_edge("handle_human_request", END)
     workflow.add_edge("handle_out_of_scope", END)
 
-    return workflow.compile(checkpointer=checkpointer)
+    compiled_graph = workflow.compile(checkpointer=checkpointer)
+    return compiled_graph, checkpointer
 
 
 async def close_pool():

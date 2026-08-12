@@ -10,6 +10,7 @@ from langgraph.graph.message import add_messages
 
 class IntentState(TypedDict):
     name: Optional[Literal[
+        "greeting",
         "business_information",
         "product_service_knowledge",
         "transaction",
@@ -53,7 +54,10 @@ class TransactionState(TypedDict):
     request_id: Optional[str]
 
 
-
+class LastProductState(TypedDict):
+    resource_id: int
+    name: str
+    
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -63,3 +67,4 @@ class AgentState(TypedDict):
     product_query: ProductQueryState
     business_info: BusinessInfoState
     transaction: TransactionState
+    last_product_discussed: Optional[LastProductState]

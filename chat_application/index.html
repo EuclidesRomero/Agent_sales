@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Application</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>Chat de Prueba</h1>
+        </div>
+        
+        <div class="chat-messages" id="chatMessages">
+            <div class="message system">
+                <div class="message-content">
+                    Bienvenido al chat de prueba. Ingresa tu mensaje para comenzar.
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-input-container">
+            <input 
+                type="text" 
+                id="messageInput" 
+                placeholder="Escribe tu mensaje..." 
+                class="chat-input"
+            >
+            <button id="sendButton" class="send-button">Enviar</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

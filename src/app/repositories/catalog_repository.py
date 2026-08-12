@@ -42,3 +42,25 @@ async def search_catalog(
 
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+async def get_product_details(
+    db: AsyncSession,
+    business_id: int,
+    resource_id: int,
+) -> BusinessResource | None:
+    """
+    Get detailed information for a specific resource including all variants.
+    """
+    query = (
+        select(BusinessResource)
+        .options(selectinload(BusinessResource.variants))
+        .where(
+            and_(
+                BusinessResource.id == resource_id,
+                BusinessResource.business_id == business_id,
+            )
+        )
+    )
+    result = await db.execute(query)
+    return result.scalars().first()
